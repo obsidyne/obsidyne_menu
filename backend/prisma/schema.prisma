@@ -1,0 +1,163 @@
+// This is your Prisma schema file
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum DishStatus {
+  AVAILABLE
+  UNAVAILABLE
+  OUT_OF_STOCK
+}
+
+model User {
+  id           String      @id @default(uuid())
+  email        String      @unique
+  password     String
+  name         String
+  role         UserRole    @default(USER)
+  restaurantId String?
+  
+  restaurant   Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  @@index([email])
+  @@index([restaurantId])
+}
+
+model Restaurant {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  address     String?
+  phone       String?
+  email       String?
+  logo        String?
+  slug         String   @unique @default("")
+  isActive    Boolean    @default(true)
+  menus       Menu[]
+  users       User[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([isActive])
+}
+
+model Menu {
+  id           String     @id @default(uuid())
+  name         String
+  description  String?
+  isActive     Boolean    @default(true)
+  qrCode       String?    @unique
+  
+  // Menu styling configuration stored as JSON
+  config       Json?
+  
+  restaurantId String
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  
+  categories   Category[]
+  dishes       Dish[]
+  combos       Combo[]
+  
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([restaurantId])
+  @@index([qrCode])
+  @@index([isActive])
+}
+
+model Category {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  image       String?
+  sortOrder   Int      @default(0)
+  isActive    Boolean  @default(true)
+  
+  menuId      String
+  menu        Menu     @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  
+  dishes      Dish[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([menuId])
+  @@index([sortOrder])
+}
+
+model Dish {
+  id          String     @id @default(uuid())
+  name        String
+  description String?
+  price       Float
+  image       String?
+  isVeg       Boolean    @default(false)
+  isVegan     Boolean    @default(false)
+  status      DishStatus @default(AVAILABLE)
+  sortOrder   Int        @default(0)
+  
+  menuId      String
+  menu        Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  
+  categoryId  String
+  category    Category   @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  
+  comboDishes ComboDish[]
+  
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@index([menuId])
+  @@index([categoryId])
+  @@index([status])
+}
+
+model Combo {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  price       Float
+  image       String?
+  discount    Float?      @default(0)
+  isActive    Boolean     @default(true)
+  sortOrder   Int         @default(0)
+  
+  menuId      String
+  menu        Menu        @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  
+  comboDishes ComboDish[]
+  
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  @@index([menuId])
+  @@index([isActive])
+}
+
+model ComboDish {
+  id        String   @id @default(uuid())
+  comboId   String
+  combo     Combo    @relation(fields: [comboId], references: [id], onDelete: Cascade)
+  dishId    String
+  dish      Dish     @relation(fields: [dishId], references: [id], onDelete: Cascade)
+  quantity  Int      @default(1)
+  createdAt DateTime @default(now())
+
+  @@unique([comboId, dishId])
+  @@index([comboId])
+  @@index([dishId])
+}
