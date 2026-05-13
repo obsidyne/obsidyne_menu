@@ -464,7 +464,8 @@ const uploadImage = async () => {
               <div className="h-48 bg-gray-200 relative">
                 {combo.image ? (
                   <img
-                    src={combo.image}
+                    // src={combo.image}
+                    src={`${process.env.NEXT_PUBLIC_API_URL}/${combo.image}`}
                     alt={combo.name}
                     className="w-full h-full object-cover"
                   />
