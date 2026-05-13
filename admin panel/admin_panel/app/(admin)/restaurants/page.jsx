@@ -12,7 +12,7 @@ export default function RestaurantsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  
+
   // Modal states
   const [isCreateModal, setIsCreateModal] = useState(false);
   const [isEditModal, setIsEditModal] = useState(false);
@@ -38,7 +38,7 @@ export default function RestaurantsPage() {
     try {
       setLoading(true);
       const token = localStorage.getItem('token');
-      
+
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/restaurants`, {
         headers: {
           'Authorization': `Bearer ${token}`
@@ -56,6 +56,38 @@ export default function RestaurantsPage() {
       setLoading(false);
     }
   };
+
+  // const handleCreateRestaurant = async (e) => {
+  //   e.preventDefault();
+  //   try {
+  //     const token = localStorage.getItem('token');
+  //     const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/restaurants`, {
+  //       method: 'POST',
+  //       headers: {
+  //         'Content-Type': 'application/json',
+  //         'Authorization': `Bearer ${token}`
+  //       },
+  //       body: JSON.stringify(restaurantForm)
+  //     });
+
+  //     if (!response.ok) {
+  //       const error = await response.json();
+  //       throw new Error(error.error || 'Failed to create restaurant');
+  //     }
+
+  //     const data = await response.json();
+  //     setRestaurants([...restaurants, data.restaurant]);
+  //     setIsCreateModal(false);
+  //     resetForm();
+  //     toast.success('Restaurant created successfully');
+  //   } catch (error) {
+  //     toast.error(error.message);
+  //     console.error(error);
+  //   }
+  // };
+
+  // src/app/(admin)/restaurants/page.jsx
+  // Update the success toast when creating restaurant
 
   const handleCreateRestaurant = async (e) => {
     e.preventDefault();
@@ -79,7 +111,7 @@ export default function RestaurantsPage() {
       setRestaurants([...restaurants, data.restaurant]);
       setIsCreateModal(false);
       resetForm();
-      toast.success('Restaurant created successfully');
+      toast.success(`Restaurant created successfully! Menu1 has been auto-generated.`);
     } catch (error) {
       toast.error(error.message);
       console.error(error);
@@ -108,7 +140,7 @@ export default function RestaurantsPage() {
       }
 
       const data = await response.json();
-      setRestaurants(restaurants.map(r => 
+      setRestaurants(restaurants.map(r =>
         r.id === selectedRestaurant.id ? data.restaurant : r
       ));
       setIsEditModal(false);
@@ -187,13 +219,13 @@ export default function RestaurantsPage() {
 
   const filteredRestaurants = restaurants.filter(restaurant => {
     const matchesSearch = restaurant.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         restaurant.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         restaurant.phone?.includes(searchTerm);
-    
-    const matchesStatus = statusFilter === 'all' || 
-                         (statusFilter === 'active' && restaurant.isActive) ||
-                         (statusFilter === 'inactive' && !restaurant.isActive);
-    
+      restaurant.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      restaurant.phone?.includes(searchTerm);
+
+    const matchesStatus = statusFilter === 'all' ||
+      (statusFilter === 'active' && restaurant.isActive) ||
+      (statusFilter === 'inactive' && !restaurant.isActive);
+
     return matchesSearch && matchesStatus;
   });
 
@@ -320,11 +352,10 @@ export default function RestaurantsPage() {
                     </td>
                     <td className="px-6 py-4">
                       <span
-                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          restaurant.isActive
+                        className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${restaurant.isActive
                             ? 'bg-green-100 text-green-800'
                             : 'bg-red-100 text-red-800'
-                        }`}
+                          }`}
                       >
                         {restaurant.isActive ? 'Active' : 'Inactive'}
                       </span>
@@ -599,7 +630,7 @@ export default function RestaurantsPage() {
           {selectedRestaurant && (selectedRestaurant._count.menus > 0 || selectedRestaurant._count.users > 0) && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3">
               <p className="text-sm text-red-800 font-medium">
-                Warning: This restaurant has {selectedRestaurant._count.menus} menu(s) and {selectedRestaurant._count.users} user(s). 
+                Warning: This restaurant has {selectedRestaurant._count.menus} menu(s) and {selectedRestaurant._count.users} user(s).
                 Deleting this restaurant will also delete all associated data.
               </p>
             </div>

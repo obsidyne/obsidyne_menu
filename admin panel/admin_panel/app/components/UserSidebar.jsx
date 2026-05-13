@@ -2,45 +2,48 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useRouter, usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
 
 export default function UserSidebar() {
-  const pathname = usePathname();
   const router = useRouter();
+  const pathname = usePathname();
   const [user, setUser] = useState(null);
   const [restaurant, setRestaurant] = useState(null);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   useEffect(() => {
-    // Get user from localStorage
-    const userData = localStorage.getItem('user');
-    if (userData) {
-      const parsedUser = JSON.parse(userData);
-      setUser(parsedUser);
+    const userString = localStorage.getItem('user');
+    if (userString) {
+      const userData = JSON.parse(userString);
+      setUser(userData);
       
-      // Fetch restaurant details if user has restaurantId
-      if (parsedUser.restaurantId) {
-        fetchRestaurant(parsedUser.restaurantId);
+      // Fetch restaurant info using profile endpoint (which user has access to)
+      if (userData.restaurantId) {
+        fetchRestaurantInfo();
       }
     }
   }, []);
 
-  const fetchRestaurant = async (restaurantId) => {
+  const fetchRestaurantInfo = async () => {
     try {
       const token = localStorage.getItem('token');
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/restaurants/${restaurantId}`, {
+      
+      // Use the profile endpoint which includes restaurant info
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/profile`, {
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
 
-      if (response.ok) {
-        const data = await response.json();
-        setRestaurant(data.restaurant || data);
+      if (!response.ok) throw new Error('Failed to fetch profile');
+
+      const data = await response.json();
+      
+      if (data.restaurant) {
+        setRestaurant(data.restaurant);
       }
     } catch (error) {
-      console.error('Failed to fetch restaurant:', error);
+      console.error('Error fetching restaurant info:', error);
     }
   };
 
@@ -91,101 +94,113 @@ export default function UserSidebar() {
 
   return (
     <>
-      {/* Mobile menu button */}
+      {/* Mobile Menu Button */}
       <button
-        onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-        className="lg:hidden fixed top-4 left-4 z-50 p-2 rounded-md bg-white shadow-lg"
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-blue-600 text-white rounded-lg"
+        onClick={() => {
+          const sidebar = document.getElementById('user-sidebar');
+          sidebar.classList.toggle('-translate-x-full');
+        }}
       >
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
         </svg>
       </button>
 
-      {/* Overlay */}
-      {isSidebarOpen && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-40"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
-
       {/* Sidebar */}
-      <div
-        className={`fixed top-0 left-0 h-full w-64 bg-white shadow-lg z-40 transform transition-transform duration-300 ease-in-out ${
-          isSidebarOpen ? 'translate-x-0' : '-translate-x-full'
-        } lg:translate-x-0`}
+      <aside
+        id="user-sidebar"
+        className="fixed left-0 top-0 h-full w-64 bg-blue-600 text-white shadow-lg transform -translate-x-full lg:translate-x-0 transition-transform duration-200 ease-in-out z-40"
       >
         <div className="flex flex-col h-full">
-          {/* Header */}
-          <div className="p-6 border-b border-gray-200">
-            <h1 className="text-xl font-bold text-gray-800">Restaurant Menu</h1>
-            {restaurant && (
-              <div className="mt-3">
-                <div className="flex items-center gap-2">
-                  {restaurant.logo ? (
-                    <img
-                      src={restaurant.logo}
-                      alt={restaurant.name}
-                      className="w-8 h-8 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                      <span className="text-blue-600 font-semibold text-sm">
-                        {restaurant.name.charAt(0)}
-                      </span>
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-sm font-medium text-gray-800">{restaurant.name}</p>
-                    <p className="text-xs text-gray-500">Restaurant Owner</p>
-                  </div>
+          {/* Restaurant Header */}
+          <div className="p-6 border-b border-blue-500">
+            <div className="flex items-center gap-3 mb-2">
+              {restaurant?.logo ? (
+                <img 
+                  src={restaurant.logo} 
+                  alt={restaurant.name} 
+                  className="h-12 w-12 rounded-full object-cover"
+                />
+              ) : (
+                <div className="h-12 w-12 rounded-full bg-blue-500 flex items-center justify-center">
+                  <span className="text-xl font-bold">
+                    {restaurant?.name?.charAt(0) || 'R'}
+                  </span>
                 </div>
+              )}
+              <div>
+                <h2 className="text-lg font-bold">
+                  {restaurant?.name || 'Restaurant'}
+                </h2>
+                <p className="text-xs text-blue-200">Menu Management</p>
               </div>
-            )}
+            </div>
+          </div>
+
+          {/* User Info */}
+          <div className="px-6 py-4 border-b border-blue-500">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-blue-500 flex items-center justify-center">
+                <span className="text-sm font-bold">
+                  {user?.name?.charAt(0) || 'U'}
+                </span>
+              </div>
+              <div>
+                <p className="font-medium text-sm">{user?.name || 'User'}</p>
+                <p className="text-xs text-blue-200 uppercase">{user?.role || 'USER'}</p>
+              </div>
+            </div>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-            {navItems.map((item) => {
-              const isActive = pathname === item.path;
-              return (
-                <Link
-                  key={item.path}
-                  href={item.path}
-                  onClick={() => setIsSidebarOpen(false)}
-                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                    isActive
-                      ? 'bg-blue-50 text-blue-600 font-medium'
-                      : 'text-gray-700 hover:bg-gray-50'
-                  }`}
-                >
-                  {item.icon}
-                  <span>{item.name}</span>
-                </Link>
-              );
-            })}
+          <nav className="flex-1 py-6">
+            <ul className="space-y-2 px-3">
+              {navItems.map((item) => {
+                const isActive = pathname === item.path;
+                return (
+                  <li key={item.path}>
+                    <Link
+                      href={item.path}
+                      className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                        isActive
+                          ? 'bg-blue-700 text-white'
+                          : 'text-blue-100 hover:bg-blue-700'
+                      }`}
+                    >
+                      {item.icon}
+                      <span className="font-medium">{item.name}</span>
+                    </Link>
+                  </li>
+                );
+              })}
+            </ul>
           </nav>
 
-          {/* User Info & Logout */}
-          <div className="p-4 border-t border-gray-200">
-            {user && (
-              <div className="mb-3 px-4 py-2 bg-gray-50 rounded-lg">
-                <p className="text-sm font-medium text-gray-800">{user.name}</p>
-                <p className="text-xs text-gray-500">{user.email}</p>
-              </div>
-            )}
+          {/* Logout Button */}
+          <div className="p-4 border-t border-blue-500">
             <button
               onClick={handleLogout}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-500 hover:bg-red-600 rounded-lg transition-colors"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
               </svg>
-              <span>Logout</span>
+              <span className="font-medium">Logout</span>
             </button>
           </div>
         </div>
-      </div>
+      </aside>
+
+      {/* Overlay for mobile */}
+      <div
+        className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-30 hidden"
+        id="sidebar-overlay"
+        onClick={() => {
+          const sidebar = document.getElementById('user-sidebar');
+          sidebar.classList.add('-translate-x-full');
+        }}
+      />
     </>
   );
 }

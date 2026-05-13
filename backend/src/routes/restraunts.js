@@ -2,7 +2,7 @@
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
 import auth from '../middleware/auth.js';
-import { isAdmin } from '../middleware/roleCheck.js';
+import { isAdmin, isAdminOrOwner } from '../middleware/roleCheck.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();

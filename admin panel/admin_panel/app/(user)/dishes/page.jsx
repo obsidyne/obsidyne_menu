@@ -10,15 +10,14 @@ export default function DishesPage() {
   const [menus, setMenus] = useState([]);
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedMenu, setSelectedMenu] = useState('all');
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [selectedMenu, setSelectedMenu] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('');
   
   // Modal states
-  const [isDishModal, setIsDishModal] = useState(false);
+  const [isCreateModal, setIsCreateModal] = useState(false);
+  const [isEditModal, setIsEditModal] = useState(false);
   const [isDeleteModal, setIsDeleteModal] = useState(false);
-  const [editingDish, setEditingDish] = useState(null);
-  const [deletingDish, setDeletingDish] = useState(null);
-  const [uploadingImage, setUploadingImage] = useState(false);
+  const [selectedDish, setSelectedDish] = useState(null);
 
   // Form state
   const [dishForm, setDishForm] = useState({
@@ -26,31 +25,61 @@ export default function DishesPage() {
     description: '',
     price: '',
     image: '',
+    categoryId: '',
+    menuId: '',
     isVeg: false,
     isVegan: false,
-    status: 'AVAILABLE',
-    menuId: '',
-    categoryId: ''
+    status: 'AVAILABLE'
   });
 
+  // Image upload
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
+
   useEffect(() => {
-    fetchMenus();
+    fetchUserData();
   }, []);
 
   useEffect(() => {
-    if (menus.length > 0) {
-      fetchCategories();
+    if (selectedMenu) {
+      fetchCategories(selectedMenu);
       fetchDishes();
     }
-  }, [selectedMenu, selectedCategory, menus]);
+  }, [selectedMenu]);
 
-  const fetchMenus = async () => {
+  useEffect(() => {
+    if (selectedCategory) {
+      fetchDishes();
+    }
+  }, [selectedCategory]);
+
+  const fetchUserData = async () => {
     try {
+      setLoading(true);
       const token = localStorage.getItem('token');
-      const user = JSON.parse(localStorage.getItem('user'));
+      
+      // Fetch user profile which includes restaurant info
+      const profileResponse = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/profile`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/restaurants/${user.restaurantId}/menus`,
+      if (!profileResponse.ok) throw new Error('Failed to fetch profile');
+
+      const profileData = await profileResponse.json();
+      
+      if (!profileData.restaurant) {
+        toast.error('No restaurant assigned to your account');
+        return;
+      }
+
+      const restaurantId = profileData.restaurant.id;
+
+      // Fetch menus for this restaurant
+      const menusResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/menus?restaurantId=${restaurantId}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -58,30 +87,36 @@ export default function DishesPage() {
         }
       );
 
-      if (!response.ok) throw new Error('Failed to fetch menus');
+      if (!menusResponse.ok) throw new Error('Failed to fetch menus');
 
-      const data = await response.json();
-      setMenus(data);
+      const menusData = await menusResponse.json();
+      setMenus(menusData);
+
+      // Auto-select first menu if available
+      if (menusData.length > 0) {
+        setSelectedMenu(menusData[0].id);
+      }
+
     } catch (error) {
-      toast.error('Failed to load menus');
+      toast.error(error.message || 'Failed to load data');
       console.error(error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const fetchCategories = async () => {
+  const fetchCategories = async (menuId) => {
     try {
       const token = localStorage.getItem('token');
       
-      let url = `${process.env.NEXT_PUBLIC_API_URL}/api/categories`;
-      if (selectedMenu !== 'all') {
-        url += `?menuId=${selectedMenu}`;
-      }
-
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/categories?menuId=${menuId}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
         }
-      });
+      );
 
       if (!response.ok) throw new Error('Failed to fetch categories');
 
@@ -95,22 +130,11 @@ export default function DishesPage() {
 
   const fetchDishes = async () => {
     try {
-      setLoading(true);
       const token = localStorage.getItem('token');
       
-      let url = `${process.env.NEXT_PUBLIC_API_URL}/api/dishes`;
-      const params = new URLSearchParams();
-      
-      if (selectedMenu !== 'all') {
-        params.append('menuId', selectedMenu);
-      }
-      
-      if (selectedCategory !== 'all') {
-        params.append('categoryId', selectedCategory);
-      }
-      
-      if (params.toString()) {
-        url += `?${params.toString()}`;
+      let url = `${process.env.NEXT_PUBLIC_API_URL}/api/dishes?menuId=${selectedMenu}`;
+      if (selectedCategory) {
+        url += `&categoryId=${selectedCategory}`;
       }
 
       const response = await fetch(url, {
@@ -126,124 +150,158 @@ export default function DishesPage() {
     } catch (error) {
       toast.error('Failed to load dishes');
       console.error(error);
-    } finally {
-      setLoading(false);
     }
   };
 
-  const handleImageUpload = async (e) => {
+  const handleImageChange = (e) => {
     const file = e.target.files[0];
-    if (!file) return;
-
-    // Check file size (10MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast.error('Image size should be less than 10MB');
-      return;
+    if (file) {
+      setImageFile(file);
+      // Create preview
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
     }
+  };
 
-    // Check file type
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please upload an image file');
-      return;
-    }
+  const uploadImage = async () => {
+    if (!imageFile) return null;
 
     try {
-      setUploadingImage(true);
       const token = localStorage.getItem('token');
       const formData = new FormData();
-      formData.append('image', file);
+      formData.append('image', imageFile);
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dishes/upload`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData
-      });
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/dishes/upload`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          },
+          body: formData
+        }
+      );
 
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to upload image');
-      }
+      if (!response.ok) throw new Error('Image upload failed');
 
       const data = await response.json();
-      // Use WebP version as the primary image
-      setDishForm({ ...dishForm, image: `${process.env.NEXT_PUBLIC_API_URL}${data.webpUrl}` });
-      toast.success('Image uploaded and optimized successfully');
+      return data.webpUrl; // Return the WebP optimized image URL
     } catch (error) {
-      toast.error(error.message);
-      console.error(error);
-    } finally {
-      setUploadingImage(false);
+      console.error('Image upload error:', error);
+      throw error;
     }
   };
 
-  const handleCreateDish = async (e) => {
-    e.preventDefault();
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dishes`, {
-        method: 'POST',
+ // src/app/(user)/dishes/page.jsx
+// Find the handleCreateDish function and fix it:
+
+const handleCreateDish = async (e) => {
+  e.preventDefault();
+  try {
+    setUploadProgress(10);
+
+    // Upload image if selected
+    let imageUrl = dishForm.image;
+    if (imageFile) {
+      setUploadProgress(30);
+      imageUrl = await uploadImage();
+      setUploadProgress(60);
+    }
+
+    const token = localStorage.getItem('token');
+    const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/dishes`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        ...dishForm,
+        image: imageUrl,
+        price: parseFloat(dishForm.price),
+        menuId: selectedMenu
+      })
+    });
+
+    setUploadProgress(80);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create dish');
+    }
+
+    const newDish = await response.json(); // ✅ FIX: Backend returns dish directly
+    setDishes([...dishes, newDish]); // ✅ FIX: Use newDish instead of data.dish
+    setIsCreateModal(false);
+    resetForm();
+    setUploadProgress(100);
+    toast.success('Dish created successfully');
+  } catch (error) {
+    toast.error(error.message);
+    console.error(error);
+  } finally {
+    setUploadProgress(0);
+  }
+};
+ const handleUpdateDish = async (e) => {
+  e.preventDefault();
+  try {
+    setUploadProgress(10);
+
+    // Upload new image if selected
+    let imageUrl = dishForm.image;
+    if (imageFile) {
+      setUploadProgress(30);
+      imageUrl = await uploadImage();
+      setUploadProgress(60);
+    }
+
+    const token = localStorage.getItem('token');
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/dishes/${selectedDish.id}`,
+      {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(dishForm)
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to create dish');
+        body: JSON.stringify({
+          ...dishForm,
+          image: imageUrl,
+          price: parseFloat(dishForm.price)
+        })
       }
+    );
 
-      const data = await response.json();
-      setDishes([...dishes, data]);
-      setIsDishModal(false);
-      resetForm();
-      toast.success('Dish created successfully');
-    } catch (error) {
-      toast.error(error.message);
-      console.error(error);
+    setUploadProgress(80);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to update dish');
     }
-  };
 
-  const handleUpdateDish = async (e) => {
-    e.preventDefault();
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/dishes/${editingDish.id}`,
-        {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(dishForm)
-        }
-      );
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to update dish');
-      }
-
-      const data = await response.json();
-      setDishes(dishes.map(d => d.id === editingDish.id ? data : d));
-      setIsDishModal(false);
-      resetForm();
-      toast.success('Dish updated successfully');
-    } catch (error) {
-      toast.error(error.message);
-      console.error(error);
-    }
-  };
+    const updatedDish = await response.json(); // ✅ FIX: Backend returns dish directly
+    setDishes(dishes.map(d => d.id === selectedDish.id ? updatedDish : d)); // ✅ FIX
+    setIsEditModal(false);
+    resetForm();
+    setUploadProgress(100);
+    toast.success('Dish updated successfully');
+  } catch (error) {
+    toast.error(error.message);
+    console.error(error);
+  } finally {
+    setUploadProgress(0);
+  }
+};
 
   const handleDeleteDish = async () => {
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/dishes/${deletingDish.id}`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/dishes/${selectedDish.id}`,
         {
           method: 'DELETE',
           headers: {
@@ -257,9 +315,9 @@ export default function DishesPage() {
         throw new Error(error.error || 'Failed to delete dish');
       }
 
-      setDishes(dishes.filter(d => d.id !== deletingDish.id));
+      setDishes(dishes.filter(d => d.id !== selectedDish.id));
       setIsDeleteModal(false);
-      setDeletingDish(null);
+      setSelectedDish(null);
       toast.success('Dish deleted successfully');
     } catch (error) {
       toast.error(error.message);
@@ -267,70 +325,60 @@ export default function DishesPage() {
     }
   };
 
-  const handleStatusChange = async (dishId, newStatus) => {
-    try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/dishes/${dishId}/status`,
-        {
-          method: 'PATCH',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ status: newStatus })
-        }
-      );
+ const handleStatusChange = async (dishId, newStatus) => {
+  try {
+    const token = localStorage.getItem('token');
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/dishes/${dishId}/status`,
+      {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ status: newStatus })
+      }
+    );
 
-      if (!response.ok) throw new Error('Failed to update status');
-
-      const data = await response.json();
-      setDishes(dishes.map(d => d.id === dishId ? data : d));
-      toast.success('Status updated successfully');
-    } catch (error) {
-      toast.error(error.message);
-      console.error(error);
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to update status');
     }
-  };
 
+    const updatedDish = await response.json(); // ✅ FIX: Backend returns dish directly
+    setDishes(dishes.map(d => d.id === dishId ? updatedDish : d)); // ✅ FIX
+    toast.success('Status updated successfully');
+  } catch (error) {
+    toast.error(error.message);
+    console.error(error);
+  }
+};
   const openCreateModal = () => {
     resetForm();
-    setEditingDish(null);
-    
-    const defaultMenuId = selectedMenu !== 'all' ? selectedMenu : (menus[0]?.id || '');
-    const filteredCategories = categories.filter(c => 
-      selectedMenu === 'all' || c.menuId === selectedMenu
-    );
-    const defaultCategoryId = selectedCategory !== 'all' 
-      ? selectedCategory 
-      : (filteredCategories[0]?.id || '');
-
-    setDishForm({
-      ...dishForm,
-      menuId: defaultMenuId,
-      categoryId: defaultCategoryId
-    });
-    setIsDishModal(true);
+    setSelectedDish(null);
+    setIsCreateModal(true);
   };
 
   const openEditModal = (dish) => {
-    setEditingDish(dish);
+    setSelectedDish(dish);
     setDishForm({
       name: dish.name,
       description: dish.description || '',
       price: dish.price.toString(),
       image: dish.image || '',
+      categoryId: dish.categoryId,
+      menuId: dish.menuId,
       isVeg: dish.isVeg,
       isVegan: dish.isVegan,
-      status: dish.status,
-      menuId: dish.menuId,
-      categoryId: dish.categoryId
+      status: dish.status
     });
-    setIsDishModal(true);
+    setImagePreview(dish.image || '');
+    setImageFile(null);
+    setIsEditModal(true);
   };
 
   const openDeleteModal = (dish) => {
-    setDeletingDish(dish);
+    setSelectedDish(dish);
     setIsDeleteModal(true);
   };
 
@@ -340,64 +388,58 @@ export default function DishesPage() {
       description: '',
       price: '',
       image: '',
+      categoryId: '',
+      menuId: '',
       isVeg: false,
       isVegan: false,
-      status: 'AVAILABLE',
-      menuId: '',
-      categoryId: ''
+      status: 'AVAILABLE'
     });
-    setEditingDish(null);
+    setImageFile(null);
+    setImagePreview('');
   };
 
-  const formCategories = categories.filter(c => 
-    !dishForm.menuId || c.menuId === dishForm.menuId
-  );
+  const getStatusBadge = (status) => {
+    const statusStyles = {
+      AVAILABLE: 'bg-green-100 text-green-800',
+      UNAVAILABLE: 'bg-red-100 text-red-800',
+      OUT_OF_STOCK: 'bg-yellow-100 text-yellow-800'
+    };
 
-  const getStatusBadgeColor = (status) => {
-    switch (status) {
-      case 'AVAILABLE':
-        return 'bg-green-100 text-green-800';
-      case 'UNAVAILABLE':
-        return 'bg-red-100 text-red-800';
-      case 'OUT_OF_STOCK':
-        return 'bg-yellow-100 text-yellow-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
+    return (
+      <span className={`px-2 py-1 text-xs font-semibold rounded-full ${statusStyles[status]}`}>
+        {status.replace('_', ' ')}
+      </span>
+    );
   };
 
-  const getStatusLabel = (status) => {
-    switch (status) {
-      case 'AVAILABLE':
-        return 'Available';
-      case 'UNAVAILABLE':
-        return 'Unavailable';
-      case 'OUT_OF_STOCK':
-        return 'Out of Stock';
-      default:
-        return status;
-    }
-  };
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading dishes...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div>
+    <div className="max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-800 mb-2">Dishes</h1>
-        <p className="text-gray-600">Manage your restaurant's dishes</p>
+        <p className="text-gray-600">Manage your menu items</p>
       </div>
 
-      {/* Filters and Actions */}
+      {/* Filters and Add Button */}
       <div className="mb-6 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <div className="flex gap-4 flex-1 w-full sm:w-auto flex-wrap">
+        <div className="flex gap-4 flex-1 w-full sm:w-auto">
+          {/* Menu Filter */}
           <select
             value={selectedMenu}
-            onChange={(e) => {
-              setSelectedMenu(e.target.value);
-              setSelectedCategory('all');
-            }}
+            onChange={(e) => setSelectedMenu(e.target.value)}
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
           >
-            <option value="all">All Menus</option>
+            <option value="">Select Menu</option>
             {menus.map((menu) => (
               <option key={menu.id} value={menu.id}>
                 {menu.name}
@@ -405,38 +447,38 @@ export default function DishesPage() {
             ))}
           </select>
 
+          {/* Category Filter */}
           <select
             value={selectedCategory}
             onChange={(e) => setSelectedCategory(e.target.value)}
             className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            disabled={!selectedMenu}
           >
-            <option value="all">All Categories</option>
-            {categories
-              .filter(c => selectedMenu === 'all' || c.menuId === selectedMenu)
-              .map((category) => (
-                <option key={category.id} value={category.id}>
-                  {category.name}
-                </option>
-              ))}
+            <option value="">All Categories</option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.name}
+              </option>
+            ))}
           </select>
         </div>
 
         <button
           onClick={openCreateModal}
-          className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors w-full sm:w-auto"
+          disabled={!selectedMenu}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
         >
-          + Add Dish
+          Add Dish
         </button>
       </div>
 
       {/* Dishes Grid */}
-      {loading ? (
-        <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="mt-4 text-gray-600">Loading dishes...</p>
+      {!selectedMenu ? (
+        <div className="text-center py-12 bg-white rounded-lg shadow">
+          <p className="text-gray-600">Please select a menu to view dishes</p>
         </div>
       ) : dishes.length === 0 ? (
-        <div className="text-center py-12 bg-gray-50 rounded-lg">
+        <div className="text-center py-12 bg-white rounded-lg shadow">
           <p className="text-gray-600 mb-4">No dishes found</p>
           <button
             onClick={openCreateModal}
@@ -446,14 +488,11 @@ export default function DishesPage() {
           </button>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {dishes.map((dish) => (
-            <div
-              key={dish.id}
-              className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow"
-            >
+            <div key={dish.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
               {/* Dish Image */}
-              <div className="relative h-48 bg-gray-200">
+              <div className="h-48 bg-gray-200 relative">
                 {dish.image ? (
                   <img
                     src={dish.image}
@@ -461,61 +500,44 @@ export default function DishesPage() {
                     className="w-full h-full object-cover"
                   />
                 ) : (
-                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-blue-100 to-blue-200">
-                    <svg
-                      className="w-16 h-16 text-blue-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
-                      />
+                  <div className="w-full h-full flex items-center justify-center">
+                    <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                     </svg>
                   </div>
                 )}
                 
-                {/* Dietary badges */}
-                <div className="absolute top-2 left-2 flex gap-1">
+                {/* Dietary Badges */}
+                <div className="absolute top-2 left-2 flex gap-2">
                   {dish.isVeg && (
-                    <span className="px-2 py-1 bg-green-500 text-white text-xs rounded-full">
-                      Veg
+                    <span className="bg-green-500 text-white text-xs px-2 py-1 rounded-full">
+                      VEG
                     </span>
                   )}
                   {dish.isVegan && (
-                    <span className="px-2 py-1 bg-green-600 text-white text-xs rounded-full">
-                      Vegan
+                    <span className="bg-green-600 text-white text-xs px-2 py-1 rounded-full">
+                      VEGAN
                     </span>
                   )}
-                </div>
-
-                {/* Status badge */}
-                <div className="absolute top-2 right-2">
-                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${getStatusBadgeColor(dish.status)}`}>
-                    {getStatusLabel(dish.status)}
-                  </span>
                 </div>
               </div>
 
               {/* Dish Info */}
               <div className="p-4">
-                <h3 className="text-lg font-semibold text-gray-800 mb-1 line-clamp-1">
-                  {dish.name}
-                </h3>
-                <p className="text-sm text-gray-600 mb-2 line-clamp-2 h-10">
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-lg font-semibold text-gray-800">{dish.name}</h3>
+                  <span className="text-lg font-bold text-blue-600">₹{dish.price}</span>
+                </div>
+
+                <p className="text-sm text-gray-600 mb-3 line-clamp-2">
                   {dish.description || 'No description'}
                 </p>
-                
+
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xl font-bold text-green-600">
-                    ₹{dish.price.toFixed(2)}
+                  <span className="text-xs text-gray-500">
+                    {categories.find(c => c.id === dish.categoryId)?.name || 'Uncategorized'}
                   </span>
-                  <div className="text-xs text-gray-500">
-                    {dish.category.name}
-                  </div>
+                  {getStatusBadge(dish.status)}
                 </div>
 
                 {/* Status Dropdown */}
@@ -523,7 +545,7 @@ export default function DishesPage() {
                   <select
                     value={dish.status}
                     onChange={(e) => handleStatusChange(dish.id, e.target.value)}
-                    className="w-full px-3 py-1 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   >
                     <option value="AVAILABLE">Available</option>
                     <option value="UNAVAILABLE">Unavailable</option>
@@ -531,17 +553,17 @@ export default function DishesPage() {
                   </select>
                 </div>
 
-                {/* Action Buttons */}
+                {/* Actions */}
                 <div className="flex gap-2">
                   <button
                     onClick={() => openEditModal(dish)}
-                    className="flex-1 px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
+                    className="flex-1 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
                   >
                     Edit
                   </button>
                   <button
                     onClick={() => openDeleteModal(dish)}
-                    className="flex-1 px-3 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
+                    className="flex-1 px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors"
                   >
                     Delete
                   </button>
@@ -552,66 +574,13 @@ export default function DishesPage() {
         </div>
       )}
 
-      {/* Create/Edit Modal */}
+      {/* Create Dish Modal */}
       <Modal
-        isOpen={isDishModal}
-        onClose={() => {
-          setIsDishModal(false);
-          resetForm();
-        }}
-        title={editingDish ? 'Edit Dish' : 'Create Dish'}
+        isOpen={isCreateModal}
+        onClose={() => setIsCreateModal(false)}
+        title="Add New Dish"
       >
-        <form
-          onSubmit={editingDish ? handleUpdateDish : handleCreateDish}
-          className="space-y-4"
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Menu *
-              </label>
-              <select
-                value={dishForm.menuId}
-                onChange={(e) => {
-                  setDishForm({ 
-                    ...dishForm, 
-                    menuId: e.target.value,
-                    categoryId: ''
-                  });
-                }}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-              >
-                <option value="">Select a menu</option>
-                {menus.map((menu) => (
-                  <option key={menu.id} value={menu.id}>
-                    {menu.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Category *
-              </label>
-              <select
-                value={dishForm.categoryId}
-                onChange={(e) => setDishForm({ ...dishForm, categoryId: e.target.value })}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                required
-                disabled={!dishForm.menuId}
-              >
-                <option value="">Select a category</option>
-                {formCategories.map((category) => (
-                  <option key={category.id} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
+        <form onSubmit={handleCreateDish} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Dish Name *
@@ -621,7 +590,6 @@ export default function DishesPage() {
               value={dishForm.name}
               onChange={(e) => setDishForm({ ...dishForm, name: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="e.g., Margherita Pizza"
               required
             />
           </div>
@@ -635,142 +603,245 @@ export default function DishesPage() {
               onChange={(e) => setDishForm({ ...dishForm, description: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               rows="3"
-              placeholder="Describe the dish..."
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Price (₹) *
-            </label>
-            <input
-              type="number"
-              step="0.01"
-              min="0"
-              value={dishForm.price}
-              onChange={(e) => setDishForm({ ...dishForm, price: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="0.00"
-              required
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Price *
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={dishForm.price}
+                onChange={(e) => setDishForm({ ...dishForm, price: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Category *
+              </label>
+              <select
+                value={dishForm.categoryId}
+                onChange={(e) => setDishForm({ ...dishForm, categoryId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              >
+                <option value="">Select Category</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Dish Image
             </label>
-            <div className="space-y-2">
-              {dishForm.image && (
-                <div className="relative w-full h-48 rounded-lg overflow-hidden border border-gray-300">
-                  <img
-                    src={dishForm.image}
-                    alt="Preview"
-                    className="w-full h-full object-cover"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setDishForm({ ...dishForm, image: '' })}
-                    className="absolute top-2 right-2 p-1 bg-red-600 text-white rounded-full hover:bg-red-700"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                  id="dish-image-upload"
-                  disabled={uploadingImage}
-                />
-                <label
-                  htmlFor="dish-image-upload"
-                  className={`flex-1 px-4 py-2 bg-blue-600 text-white text-center rounded-lg cursor-pointer hover:bg-blue-700 transition-colors ${
-                    uploadingImage ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                >
-                  {uploadingImage ? 'Uploading & Optimizing...' : dishForm.image ? 'Change Image' : 'Upload Image'}
-                </label>
-                {dishForm.image && (
-                  <button
-                    type="button"
-                    onClick={() => setDishForm({ ...dishForm, image: '' })}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                  >
-                    Remove
-                  </button>
-                )}
-              </div>
-              <p className="text-xs text-gray-500">
-                Upload an image (Max 10MB). Images will be automatically optimized to WebP format.
-              </p>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Status
-            </label>
-            <select
-              value={dishForm.status}
-              onChange={(e) => setDishForm({ ...dishForm, status: e.target.value })}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-            >
-              <option value="AVAILABLE">Available</option>
-              <option value="UNAVAILABLE">Unavailable</option>
-              <option value="OUT_OF_STOCK">Out of Stock</option>
-            </select>
+            />
+            {imagePreview && (
+              <div className="mt-2">
+                <img src={imagePreview} alt="Preview" className="h-32 w-32 object-cover rounded-lg" />
+              </div>
+            )}
+            {uploadProgress > 0 && uploadProgress < 100 && (
+              <div className="mt-2">
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-gray-600 mt-1">Uploading... {uploadProgress}%</p>
+              </div>
+            )}
           </div>
 
           <div className="flex gap-4">
-            <div className="flex items-center">
+            <label className="flex items-center">
               <input
                 type="checkbox"
-                id="isVeg"
                 checked={dishForm.isVeg}
                 onChange={(e) => setDishForm({ ...dishForm, isVeg: e.target.checked })}
-                className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
-              <label htmlFor="isVeg" className="ml-2 text-sm text-gray-700">
-                Vegetarian
-              </label>
-            </div>
+              <span className="ml-2 text-sm text-gray-700">Vegetarian</span>
+            </label>
 
-            <div className="flex items-center">
+            <label className="flex items-center">
               <input
                 type="checkbox"
-                id="isVegan"
                 checked={dishForm.isVegan}
                 onChange={(e) => setDishForm({ ...dishForm, isVegan: e.target.checked })}
-                className="w-4 h-4 text-green-600 border-gray-300 rounded focus:ring-green-500"
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
               />
-              <label htmlFor="isVegan" className="ml-2 text-sm text-gray-700">
-                Vegan
-              </label>
-            </div>
+              <span className="ml-2 text-sm text-gray-700">Vegan</span>
+            </label>
           </div>
 
           <div className="flex justify-end gap-2 pt-4">
             <button
               type="button"
-              onClick={() => {
-                setIsDishModal(false);
-                resetForm();
-              }}
+              onClick={() => setIsCreateModal(false)}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              disabled={uploadingImage}
+              disabled={uploadProgress > 0 && uploadProgress < 100}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {editingDish ? 'Update Dish' : 'Create Dish'}
+              Create Dish
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Dish Modal */}
+      <Modal
+        isOpen={isEditModal}
+        onClose={() => setIsEditModal(false)}
+        title="Edit Dish"
+      >
+        <form onSubmit={handleUpdateDish} className="space-y-4">
+          {/* Same form fields as create modal */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Dish Name *
+            </label>
+            <input
+              type="text"
+              value={dishForm.name}
+              onChange={(e) => setDishForm({ ...dishForm, name: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description
+            </label>
+            <textarea
+              value={dishForm.description}
+              onChange={(e) => setDishForm({ ...dishForm, description: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              rows="3"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Price *
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={dishForm.price}
+                onChange={(e) => setDishForm({ ...dishForm, price: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Category *
+              </label>
+              <select
+                value={dishForm.categoryId}
+                onChange={(e) => setDishForm({ ...dishForm, categoryId: e.target.value })}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required
+              >
+                <option value="">Select Category</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Dish Image
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            {imagePreview && (
+              <div className="mt-2">
+                <img src={imagePreview} alt="Preview" className="h-32 w-32 object-cover rounded-lg" />
+              </div>
+            )}
+            {uploadProgress > 0 && uploadProgress < 100 && (
+              <div className="mt-2">
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-gray-600 mt-1">Uploading... {uploadProgress}%</p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-4">
+            <label className="flex items-center">
+              <input
+                type="checkbox"
+                checked={dishForm.isVeg}
+                onChange={(e) => setDishForm({ ...dishForm, isVeg: e.target.checked })}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="ml-2 text-sm text-gray-700">Vegetarian</span>
+            </label>
+
+            <label className="flex items-center">
+              <input
+                type="checkbox"
+                checked={dishForm.isVegan}
+                onChange={(e) => setDishForm({ ...dishForm, isVegan: e.target.checked })}
+                className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+              />
+              <span className="ml-2 text-sm text-gray-700">Vegan</span>
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4">
+            <button
+              type="button"
+              onClick={() => setIsEditModal(false)}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={uploadProgress > 0 && uploadProgress < 100}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Update Dish
             </button>
           </div>
         </form>
@@ -779,23 +850,17 @@ export default function DishesPage() {
       {/* Delete Confirmation Modal */}
       <Modal
         isOpen={isDeleteModal}
-        onClose={() => {
-          setIsDeleteModal(false);
-          setDeletingDish(null);
-        }}
+        onClose={() => setIsDeleteModal(false)}
         title="Confirm Delete"
       >
         <div className="space-y-4">
           <p className="text-gray-700">
-            Are you sure you want to delete "{deletingDish?.name}"? This action cannot be undone.
+            Are you sure you want to delete "{selectedDish?.name}"? This action cannot be undone.
           </p>
 
           <div className="flex justify-end gap-2 pt-4">
             <button
-              onClick={() => {
-                setIsDeleteModal(false);
-                setDeletingDish(null);
-              }}
+              onClick={() => setIsDeleteModal(false)}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
             >
               Cancel

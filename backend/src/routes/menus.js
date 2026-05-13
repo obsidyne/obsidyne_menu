@@ -8,6 +8,55 @@ const router = express.Router();
 const prisma = new PrismaClient();
 
 /**
+ * @route   GET /api/menus
+ * @desc    Get all menus (filtered by restaurantId if provided)
+ * @access  Private (Admin or Restaurant User)
+ */
+router.get('/', auth, async (req, res) => {
+  try {
+    const { restaurantId } = req.query;
+
+    let where = {};
+
+    if (req.user.role === 'ADMIN') {
+      // Admin can see all menus or filter by restaurantId
+      if (restaurantId) {
+        where.restaurantId = restaurantId;
+      }
+    } else {
+      // Regular users can only see their restaurant's menus
+      where.restaurantId = req.user.restaurantId;
+    }
+
+    const menus = await prisma.menu.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        restaurant: {
+          select: {
+            id: true,
+            name: true,
+            slug: true
+          }
+        },
+        _count: {
+          select: {
+            categories: true,
+            dishes: true,
+            combos: true
+          }
+        }
+      }
+    });
+
+    res.json(menus);
+  } catch (error) {
+    console.error('Get menus error:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+/**
  * @route   GET /api/menus/:id
  * @desc    Get single menu by ID
  * @access  Private (Admin or Restaurant User)
@@ -231,7 +280,14 @@ router.post('/:id/generate-qr', auth, async (req, res) => {
 
     // Check if menu exists
     const menu = await prisma.menu.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        restaurant: {
+          select: {
+            slug: true
+          }
+        }
+      }
     });
 
     if (!menu) {
@@ -243,8 +299,8 @@ router.post('/:id/generate-qr', auth, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
 
-    // Generate menu URL (adjust this to your actual frontend URL)
-    const menuUrl = `${process.env.MENU_FRONTEND_URL || 'http://localhost:3001'}/menu/${id}`;
+    // Generate menu URL using restaurant slug
+    const menuUrl = `${process.env.MENU_FRONTEND_URL || 'http://localhost:3001'}/${menu.restaurant.slug}`;
 
     // Generate QR code as data URL
     const qrCodeDataUrl = await QRCode.toDataURL(menuUrl, {

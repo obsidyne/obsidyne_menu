@@ -1,3 +1,4 @@
+// src/components/Sidebar.jsx
 'use client';
 
 import Link from 'next/link';
@@ -13,16 +14,8 @@ export default function Sidebar() {
   const adminLinks = [
     { href: '/restaurants', label: 'Restaurants' },
     { href: '/users', label: 'Users' },
-  ];
-
-  const userLinks = [
-    { href: '/dishes', label: 'Dishes' },
-    { href: '/categories', label: 'Categories' },
-    { href: '/combos', label: 'Combos' },
     { href: '/profile', label: 'Profile' },
   ];
-
-  const links = user?.role === 'ADMIN' ? adminLinks : userLinks;
 
   return (
     <div className="w-64 bg-blue-600 text-white min-h-screen flex flex-col">
@@ -34,7 +27,7 @@ export default function Sidebar() {
 
       <nav className="flex-1 p-4">
         <ul className="space-y-2">
-          {links.map((link) => (
+          {adminLinks.map((link) => (
             <li key={link.href}>
               <Link
                 href={link.href}

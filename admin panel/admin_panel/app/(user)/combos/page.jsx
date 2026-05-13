@@ -10,14 +10,13 @@ export default function CombosPage() {
   const [menus, setMenus] = useState([]);
   const [dishes, setDishes] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedMenu, setSelectedMenu] = useState('all');
+  const [selectedMenu, setSelectedMenu] = useState('');
   
   // Modal states
-  const [isComboModal, setIsComboModal] = useState(false);
+  const [isCreateModal, setIsCreateModal] = useState(false);
+  const [isEditModal, setIsEditModal] = useState(false);
   const [isDeleteModal, setIsDeleteModal] = useState(false);
-  const [editingCombo, setEditingCombo] = useState(null);
-  const [deletingCombo, setDeletingCombo] = useState(null);
-  const [uploadingImage, setUploadingImage] = useState(false);
+  const [selectedCombo, setSelectedCombo] = useState(null);
 
   // Form state
   const [comboForm, setComboForm] = useState({
@@ -25,39 +24,36 @@ export default function CombosPage() {
     description: '',
     price: '',
     image: '',
-    discount: '0',
-    isActive: true,
     menuId: '',
-    dishes: [] // Array of { dishId, quantity }
+    isActive: true,
+    selectedDishes: [] // Array of { dishId, quantity }
   });
 
-  // Dish selection
-  const [selectedDishes, setSelectedDishes] = useState([]);
-  const [dishQuantities, setDishQuantities] = useState({});
+  // Image upload
+  const [imageFile, setImageFile] = useState(null);
+  const [imagePreview, setImagePreview] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   useEffect(() => {
-    fetchMenus();
+    fetchUserData();
   }, []);
 
   useEffect(() => {
-    if (menus.length > 0) {
+    if (selectedMenu) {
+      fetchDishes(selectedMenu);
       fetchCombos();
     }
-  }, [selectedMenu, menus]);
+  }, [selectedMenu]);
 
-  useEffect(() => {
-    if (comboForm.menuId) {
-      fetchDishesForMenu(comboForm.menuId);
-    }
-  }, [comboForm.menuId]);
-
-  const fetchMenus = async () => {
+  const fetchUserData = async () => {
     try {
+      setLoading(true);
       const token = localStorage.getItem('token');
       const user = JSON.parse(localStorage.getItem('user'));
 
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/restaurants/${user.restaurantId}/menus`,
+      // FIX: Use the correct endpoint that user has access to
+      const menusResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/menus?restaurantId=${user.restaurantId}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`
@@ -65,47 +61,28 @@ export default function CombosPage() {
         }
       );
 
-      if (!response.ok) throw new Error('Failed to fetch menus');
+      if (!menusResponse.ok) throw new Error('Failed to fetch menus');
 
-      const data = await response.json();
-      setMenus(data);
-    } catch (error) {
-      toast.error('Failed to load menus');
-      console.error(error);
-    }
-  };
+      const menusData = await menusResponse.json();
+      setMenus(menusData);
 
-  const fetchCombos = async () => {
-    try {
-      setLoading(true);
-      const token = localStorage.getItem('token');
-      
-      let url = `${process.env.NEXT_PUBLIC_API_URL}/api/combos`;
-      if (selectedMenu !== 'all') {
-        url += `?menuId=${selectedMenu}`;
+      // Auto-select first menu if available
+      if (menusData.length > 0) {
+        setSelectedMenu(menusData[0].id);
       }
 
-      const response = await fetch(url, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!response.ok) throw new Error('Failed to fetch combos');
-
-      const data = await response.json();
-      setCombos(data);
     } catch (error) {
-      toast.error('Failed to load combos');
+      toast.error(error.message || 'Failed to load data');
       console.error(error);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchDishesForMenu = async (menuId) => {
+  const fetchDishes = async (menuId) => {
     try {
       const token = localStorage.getItem('token');
+      
       const response = await fetch(
         `${process.env.NEXT_PUBLIC_API_URL}/api/dishes?menuId=${menuId}`,
         {
@@ -125,101 +102,88 @@ export default function CombosPage() {
     }
   };
 
-  const handleImageUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('Image size should be less than 10MB');
-      return;
-    }
-
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please upload an image file');
-      return;
-    }
-
+  const fetchCombos = async () => {
     try {
-      setUploadingImage(true);
       const token = localStorage.getItem('token');
-      const formData = new FormData();
-      formData.append('image', file);
+      
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_URL}/api/combos?menuId=${selectedMenu}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        }
+      );
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/combos/upload`, {
+      if (!response.ok) throw new Error('Failed to fetch combos');
+
+      const data = await response.json();
+      setCombos(data);
+    } catch (error) {
+      toast.error('Failed to load combos');
+      console.error(error);
+    }
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setImageFile(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImagePreview(reader.result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+// src/app/(user)/combos/page.jsx
+// Find and replace the uploadImage function (around line 133):
+
+const uploadImage = async () => {
+  if (!imageFile) return null;
+
+  try {
+    const token = localStorage.getItem('token');
+    const formData = new FormData();
+    formData.append('image', imageFile);
+
+    const response = await fetch(
+      `${process.env.NEXT_PUBLIC_API_URL}/api/combos/upload`,
+      {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`
         },
         body: formData
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to upload image');
       }
+    );
 
-      const data = await response.json();
-      setComboForm({ ...comboForm, image: `${process.env.NEXT_PUBLIC_API_URL}${data.webpUrl}` });
-      toast.success('Image uploaded and optimized successfully');
-    } catch (error) {
-      toast.error(error.message);
-      console.error(error);
-    } finally {
-      setUploadingImage(false);
-    }
-  };
+    if (!response.ok) throw new Error('Image upload failed');
 
-  const handleDishToggle = (dishId) => {
-    if (selectedDishes.includes(dishId)) {
-      setSelectedDishes(selectedDishes.filter(id => id !== dishId));
-      const newQuantities = { ...dishQuantities };
-      delete newQuantities[dishId];
-      setDishQuantities(newQuantities);
-    } else {
-      setSelectedDishes([...selectedDishes, dishId]);
-      setDishQuantities({ ...dishQuantities, [dishId]: 1 });
-    }
-  };
-
-  const handleQuantityChange = (dishId, quantity) => {
-    const qty = parseInt(quantity);
-    if (qty > 0) {
-      setDishQuantities({ ...dishQuantities, [dishId]: qty });
-    }
-  };
-
-  const calculateOriginalPrice = () => {
-    let total = 0;
-    selectedDishes.forEach(dishId => {
-      const dish = dishes.find(d => d.id === dishId);
-      if (dish) {
-        total += dish.price * (dishQuantities[dishId] || 1);
-      }
-    });
-    return total;
-  };
-
-  const calculateSavings = () => {
-    const original = calculateOriginalPrice();
-    const comboPrice = parseFloat(comboForm.price) || 0;
-    return original - comboPrice;
-  };
+    const data = await response.json();
+    // ✅ FIX: Return the full URL, not just the path
+    return `${process.env.NEXT_PUBLIC_API_URL}${data.webpUrl}`;
+  } catch (error) {
+    console.error('Image upload error:', error);
+    throw error;
+  }
+};
 
   const handleCreateCombo = async (e) => {
     e.preventDefault();
-
-    if (selectedDishes.length === 0) {
-      toast.error('Please select at least one dish');
-      return;
-    }
-
     try {
-      const token = localStorage.getItem('token');
-      const dishesData = selectedDishes.map(dishId => ({
-        dishId,
-        quantity: dishQuantities[dishId] || 1
-      }));
+      setUploadProgress(10);
 
+      // Upload image if selected
+      let imageUrl = comboForm.image;
+      if (imageFile) {
+        setUploadProgress(30);
+        imageUrl = await uploadImage();
+        setUploadProgress(60);
+      }
+
+      const token = localStorage.getItem('token');
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/combos`, {
         method: 'POST',
         headers: {
@@ -227,44 +191,52 @@ export default function CombosPage() {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          ...comboForm,
-          dishes: dishesData
+          name: comboForm.name,
+          description: comboForm.description,
+          price: parseFloat(comboForm.price),
+          image: imageUrl,
+          menuId: selectedMenu,
+          isActive: comboForm.isActive,
+          dishes: comboForm.selectedDishes
         })
       });
+
+      setUploadProgress(80);
 
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || 'Failed to create combo');
       }
 
-      const data = await response.json();
-      setCombos([...combos, data]);
-      setIsComboModal(false);
+      await fetchCombos();
+      setIsCreateModal(false);
       resetForm();
+      setUploadProgress(100);
       toast.success('Combo created successfully');
     } catch (error) {
       toast.error(error.message);
       console.error(error);
+    } finally {
+      setUploadProgress(0);
     }
   };
 
   const handleUpdateCombo = async (e) => {
     e.preventDefault();
-
-    if (selectedDishes.length === 0) {
-      toast.error('Please select at least one dish');
-      return;
-    }
-
     try {
-      const token = localStorage.getItem('token');
-      const dishesData = selectedDishes.map(dishId => ({
-        dishId,
-        quantity: dishQuantities[dishId] || 1
-      }));
+      setUploadProgress(10);
 
+      // Upload new image if selected
+      let imageUrl = comboForm.image;
+      if (imageFile) {
+        setUploadProgress(30);
+        imageUrl = await uploadImage();
+        setUploadProgress(60);
+      }
+
+      const token = localStorage.getItem('token');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/combos/${editingCombo.id}`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/combos/${selectedCombo.id}`,
         {
           method: 'PUT',
           headers: {
@@ -272,25 +244,33 @@ export default function CombosPage() {
             'Authorization': `Bearer ${token}`
           },
           body: JSON.stringify({
-            ...comboForm,
-            dishes: dishesData
+            name: comboForm.name,
+            description: comboForm.description,
+            price: parseFloat(comboForm.price),
+            image: imageUrl,
+            isActive: comboForm.isActive,
+            dishes: comboForm.selectedDishes
           })
         }
       );
+
+      setUploadProgress(80);
 
       if (!response.ok) {
         const error = await response.json();
         throw new Error(error.error || 'Failed to update combo');
       }
 
-      const data = await response.json();
-      setCombos(combos.map(c => c.id === editingCombo.id ? data : c));
-      setIsComboModal(false);
+      await fetchCombos();
+      setIsEditModal(false);
       resetForm();
+      setUploadProgress(100);
       toast.success('Combo updated successfully');
     } catch (error) {
       toast.error(error.message);
       console.error(error);
+    } finally {
+      setUploadProgress(0);
     }
   };
 
@@ -298,7 +278,7 @@ export default function CombosPage() {
     try {
       const token = localStorage.getItem('token');
       const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/combos/${deletingCombo.id}`,
+        `${process.env.NEXT_PUBLIC_API_URL}/api/combos/${selectedCombo.id}`,
         {
           method: 'DELETE',
           headers: {
@@ -312,9 +292,9 @@ export default function CombosPage() {
         throw new Error(error.error || 'Failed to delete combo');
       }
 
-      setCombos(combos.filter(c => c.id !== deletingCombo.id));
+      await fetchCombos();
       setIsDeleteModal(false);
-      setDeletingCombo(null);
+      setSelectedCombo(null);
       toast.success('Combo deleted successfully');
     } catch (error) {
       toast.error(error.message);
@@ -337,53 +317,61 @@ export default function CombosPage() {
 
       if (!response.ok) throw new Error('Failed to toggle status');
 
-      const data = await response.json();
-      setCombos(combos.map(c => c.id === comboId ? data.combo : c));
-      toast.success(data.message);
+      await fetchCombos();
+      toast.success('Status updated successfully');
     } catch (error) {
       toast.error(error.message);
       console.error(error);
     }
   };
 
-  const openCreateModal = () => {
-    resetForm();
-    setEditingCombo(null);
-    const defaultMenuId = selectedMenu !== 'all' ? selectedMenu : (menus[0]?.id || '');
+  const handleAddDish = () => {
     setComboForm({
       ...comboForm,
-      menuId: defaultMenuId
+      selectedDishes: [...comboForm.selectedDishes, { dishId: '', quantity: 1 }]
     });
-    setIsComboModal(true);
+  };
+
+  const handleRemoveDish = (index) => {
+    setComboForm({
+      ...comboForm,
+      selectedDishes: comboForm.selectedDishes.filter((_, i) => i !== index)
+    });
+  };
+
+  const handleDishChange = (index, field, value) => {
+    const updatedDishes = [...comboForm.selectedDishes];
+    updatedDishes[index][field] = value;
+    setComboForm({ ...comboForm, selectedDishes: updatedDishes });
+  };
+
+  const openCreateModal = () => {
+    resetForm();
+    setSelectedCombo(null);
+    setIsCreateModal(true);
   };
 
   const openEditModal = (combo) => {
-    setEditingCombo(combo);
+    setSelectedCombo(combo);
     setComboForm({
       name: combo.name,
       description: combo.description || '',
       price: combo.price.toString(),
       image: combo.image || '',
-      discount: combo.discount?.toString() || '0',
-      isActive: combo.isActive,
       menuId: combo.menuId,
-      dishes: []
+      isActive: combo.isActive,
+      selectedDishes: combo.comboDishes?.map(cd => ({
+        dishId: cd.dishId,
+        quantity: cd.quantity
+      })) || []
     });
-
-    // Set selected dishes and quantities
-    const dishIds = combo.comboDishes.map(cd => cd.dishId);
-    const quantities = {};
-    combo.comboDishes.forEach(cd => {
-      quantities[cd.dishId] = cd.quantity;
-    });
-
-    setSelectedDishes(dishIds);
-    setDishQuantities(quantities);
-    setIsComboModal(true);
+    setImagePreview(combo.image || '');
+    setImageFile(null);
+    setIsEditModal(true);
   };
 
   const openDeleteModal = (combo) => {
-    setDeletingCombo(combo);
+    setSelectedCombo(combo);
     setIsDeleteModal(true);
   };
 
@@ -393,54 +381,73 @@ export default function CombosPage() {
       description: '',
       price: '',
       image: '',
-      discount: '0',
-      isActive: true,
       menuId: '',
-      dishes: []
+      isActive: true,
+      selectedDishes: []
     });
-    setSelectedDishes([]);
-    setDishQuantities({});
-    setEditingCombo(null);
+    setImageFile(null);
+    setImagePreview('');
   };
 
+  const calculateTotalPrice = () => {
+    return comboForm.selectedDishes.reduce((total, item) => {
+      const dish = dishes.find(d => d.id === item.dishId);
+      return total + (dish ? dish.price * item.quantity : 0);
+    }, 0);
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className="text-gray-600">Loading combos...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div>
+    <div className="max-w-7xl mx-auto">
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-800 mb-2">Combos</h1>
-        <p className="text-gray-600">Manage your meal combos and special offers</p>
+        <p className="text-gray-600">Manage your combo offers</p>
       </div>
 
-      {/* Filters and Actions */}
+      {/* Filters and Add Button */}
       <div className="mb-6 flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between">
-        <select
-          value={selectedMenu}
-          onChange={(e) => setSelectedMenu(e.target.value)}
-          className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-        >
-          <option value="all">All Menus</option>
-          {menus.map((menu) => (
-            <option key={menu.id} value={menu.id}>
-              {menu.name}
-            </option>
-          ))}
-        </select>
+        <div className="flex gap-4 flex-1 w-full sm:w-auto">
+          {/* Menu Filter */}
+          <select
+            value={selectedMenu}
+            onChange={(e) => setSelectedMenu(e.target.value)}
+            className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          >
+            <option value="">Select Menu</option>
+            {menus.map((menu) => (
+              <option key={menu.id} value={menu.id}>
+                {menu.name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         <button
           onClick={openCreateModal}
-          className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors w-full sm:w-auto"
+          disabled={!selectedMenu}
+          className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full sm:w-auto"
         >
-          + Add Combo
+          Add Combo
         </button>
       </div>
 
       {/* Combos Grid */}
-      {loading ? (
-        <div className="text-center py-12">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <p className="mt-4 text-gray-600">Loading combos...</p>
+      {!selectedMenu ? (
+        <div className="text-center py-12 bg-white rounded-lg shadow">
+          <p className="text-gray-600">Please select a menu to view combos</p>
         </div>
       ) : combos.length === 0 ? (
-        <div className="text-center py-12 bg-gray-50 rounded-lg">
+        <div className="text-center py-12 bg-white rounded-lg shadow">
           <p className="text-gray-600 mb-4">No combos found</p>
           <button
             onClick={openCreateModal}
@@ -451,173 +458,99 @@ export default function CombosPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {combos.map((combo) => {
-            const originalPrice = combo.comboDishes.reduce(
-              (sum, cd) => sum + (cd.dish.price * cd.quantity),
-              0
-            );
-            const savings = originalPrice - combo.price;
-            const savingsPercent = ((savings / originalPrice) * 100).toFixed(0);
-
-            return (
-              <div
-                key={combo.id}
-                className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow"
-              >
-                {/* Combo Image */}
-                <div className="relative h-48 bg-gray-200">
-                  {combo.image ? (
-                    <img
-                      src={combo.image}
-                      alt={combo.name}
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-100 to-purple-200">
-                      <svg
-                        className="w-16 h-16 text-purple-400"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"
-                        />
-                      </svg>
-                    </div>
-                  )}
-
-                  {/* Status badge */}
-                  <div className="absolute top-2 right-2">
-                    <span
-                      className={`px-2 py-1 text-xs font-semibold rounded-full ${
-                        combo.isActive
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}
-                    >
-                      {combo.isActive ? 'Active' : 'Inactive'}
-                    </span>
+          {combos.map((combo) => (
+            <div key={combo.id} className="bg-white rounded-lg shadow-md overflow-hidden hover:shadow-lg transition-shadow">
+              {/* Combo Image */}
+              <div className="h-48 bg-gray-200 relative">
+                {combo.image ? (
+                  <img
+                    src={combo.image}
+                    alt={combo.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <svg className="w-16 h-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                    </svg>
                   </div>
-
-                  {/* Savings badge */}
-                  {savings > 0 && (
-                    <div className="absolute top-2 left-2">
-                      <span className="px-2 py-1 bg-red-500 text-white text-xs font-bold rounded-full">
-                        Save {savingsPercent}%
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Combo Info */}
-                <div className="p-4">
-                  <h3 className="text-lg font-semibold text-gray-800 mb-1 line-clamp-1">
-                    {combo.name}
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-3 line-clamp-2 h-10">
-                    {combo.description || 'No description'}
-                  </p>
-
-                  {/* Dishes in combo */}
-                  <div className="mb-3 space-y-1">
-                    <p className="text-xs font-medium text-gray-500 mb-1">Includes:</p>
-                    {combo.comboDishes.map((cd) => (
-                      <div key={cd.id} className="flex items-center text-xs text-gray-600">
-                        <span className="w-5 h-5 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mr-2 font-medium">
-                          {cd.quantity}
-                        </span>
-                        <span className="line-clamp-1">{cd.dish.name}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Pricing */}
-                  <div className="border-t pt-3 mb-3">
-                    {savings > 0 && (
-                      <div className="text-xs text-gray-500 line-through">
-                        Original: ₹{originalPrice.toFixed(2)}
-                      </div>
-                    )}
-                    <div className="flex items-center justify-between">
-                      <span className="text-2xl font-bold text-green-600">
-                        ₹{combo.price.toFixed(2)}
-                      </span>
-                      {savings > 0 && (
-                        <span className="text-sm text-green-600 font-medium">
-                          Save ₹{savings.toFixed(2)}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => openEditModal(combo)}
-                      className="flex-1 px-3 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleToggleStatus(combo.id)}
-                      className={`px-3 py-2 text-sm rounded transition-colors ${
-                        combo.isActive
-                          ? 'bg-yellow-600 text-white hover:bg-yellow-700'
-                          : 'bg-green-600 text-white hover:bg-green-700'
-                      }`}
-                    >
-                      {combo.isActive ? 'Deactivate' : 'Activate'}
-                    </button>
-                    <button
-                      onClick={() => openDeleteModal(combo)}
-                      className="px-3 py-2 bg-red-600 text-white text-sm rounded hover:bg-red-700 transition-colors"
-                    >
-                      Delete
-                    </button>
-                  </div>
+                )}
+                
+                {/* Status Badge */}
+                <div className="absolute top-2 right-2">
+                  <span className={`px-2 py-1 text-xs font-semibold rounded-full ${
+                    combo.isActive ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+                  }`}>
+                    {combo.isActive ? 'Active' : 'Inactive'}
+                  </span>
                 </div>
               </div>
-            );
-          })}
+
+              {/* Combo Info */}
+              <div className="p-4">
+                <div className="flex justify-between items-start mb-2">
+                  <h3 className="text-lg font-semibold text-gray-800">{combo.name}</h3>
+                  <span className="text-lg font-bold text-blue-600">₹{combo.price}</span>
+                </div>
+
+                <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+                  {combo.description || 'No description'}
+                </p>
+
+                <div className="mb-3">
+                  <p className="text-xs text-gray-500 mb-1">Includes:</p>
+                  <div className="space-y-1">
+                    {combo.comboDishes?.slice(0, 3).map((cd, idx) => (
+                      <div key={idx} className="text-xs text-gray-700">
+                        {cd.quantity}x {cd.dish?.name || 'Unknown Dish'}
+                      </div>
+                    ))}
+                    {combo.comboDishes?.length > 3 && (
+                      <div className="text-xs text-blue-600">
+                        +{combo.comboDishes.length - 3} more items
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => openEditModal(combo)}
+                    className="flex-1 px-3 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={() => handleToggleStatus(combo.id)}
+                    className={`flex-1 px-3 py-2 text-sm rounded-lg transition-colors ${
+                      combo.isActive
+                        ? 'bg-yellow-600 text-white hover:bg-yellow-700'
+                        : 'bg-green-600 text-white hover:bg-green-700'
+                    }`}
+                  >
+                    {combo.isActive ? 'Deactivate' : 'Activate'}
+                  </button>
+                  <button
+                    onClick={() => openDeleteModal(combo)}
+                    className="px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 transition-colors"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Create/Edit Modal */}
+      {/* Create Combo Modal */}
       <Modal
-        isOpen={isComboModal}
-        onClose={() => {
-          setIsComboModal(false);
-          resetForm();
-        }}
-        title={editingCombo ? 'Edit Combo' : 'Create Combo'}
+        isOpen={isCreateModal}
+        onClose={() => setIsCreateModal(false)}
+        title="Add New Combo"
       >
-        <form
-          onSubmit={editingCombo ? handleUpdateCombo : handleCreateCombo}
-          className="space-y-4 max-h-[70vh] overflow-y-auto pr-2"
-        >
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Menu *
-            </label>
-            <select
-              value={comboForm.menuId}
-              onChange={(e) => setComboForm({ ...comboForm, menuId: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-            >
-              <option value="">Select a menu</option>
-              {menus.map((menu) => (
-                <option key={menu.id} value={menu.id}>
-                  {menu.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
+        <form onSubmit={handleCreateCombo} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Combo Name *
@@ -627,7 +560,6 @@ export default function CombosPage() {
               value={comboForm.name}
               onChange={(e) => setComboForm({ ...comboForm, name: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="e.g., Family Feast, Lunch Special"
               required
             />
           </div>
@@ -641,193 +573,313 @@ export default function CombosPage() {
               onChange={(e) => setComboForm({ ...comboForm, description: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               rows="3"
-              placeholder="Describe the combo..."
             />
           </div>
 
-          {/* Dish Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              Select Dishes * (at least 1 required)
-            </label>
-            <div className="border border-gray-300 rounded-lg p-3 max-h-60 overflow-y-auto space-y-2">
-              {dishes.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-4">
-                  {comboForm.menuId ? 'No available dishes in this menu' : 'Please select a menu first'}
-                </p>
-              ) : (
-                dishes.map((dish) => (
-                  <div
-                    key={dish.id}
-                    className={`flex items-center gap-3 p-2 rounded-lg border-2 transition-colors ${
-                      selectedDishes.includes(dish.id)
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedDishes.includes(dish.id)}
-                      onChange={() => handleDishToggle(dish.id)}
-                      className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
-                    />
-                    {dish.image ? (
-                      <img
-                        src={dish.image}
-                        alt={dish.name}
-                        className="h-10 w-10 rounded object-cover"
-                      />
-                    ) : (
-                      <div className="h-10 w-10 rounded bg-gray-200 flex items-center justify-center">
-                        <span className="text-xs text-gray-500">{dish.name.charAt(0)}</span>
-                      </div>
-                    )}
-                    <div className="flex-1">
-                      <div className="text-sm font-medium text-gray-900">{dish.name}</div>
-                      <div className="text-xs text-gray-500">₹{dish.price.toFixed(2)}</div>
-                    </div>
-                    {selectedDishes.includes(dish.id) && (
-                      <input
-                        type="number"
-                        min="1"
-                        value={dishQuantities[dish.id] || 1}
-                        onChange={(e) => handleQuantityChange(dish.id, e.target.value)}
-                        className="w-16 px-2 py-1 border border-gray-300 rounded text-center text-sm"
-                      />
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Price Calculation */}
-          {selectedDishes.length > 0 && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Original Price:</span>
-                <span className="font-medium">₹{calculateOriginalPrice().toFixed(2)}</span>
-              </div>
-              {comboForm.price && parseFloat(comboForm.price) > 0 && (
-                <>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-600">Combo Price:</span>
-                    <span className="font-medium text-green-600">₹{parseFloat(comboForm.price).toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm border-t pt-2">
-                    <span className="text-gray-600">Savings:</span>
-                    <span className="font-bold text-green-600">
-                      ₹{calculateSavings().toFixed(2)} 
-                      ({((calculateSavings() / calculateOriginalPrice()) * 100).toFixed(0)}%)
-                    </span>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Combo Price (₹) *
+              Combo Price *
             </label>
             <input
               type="number"
               step="0.01"
-              min="0"
               value={comboForm.price}
               onChange={(e) => setComboForm({ ...comboForm, price: e.target.value })}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder="0.00"
               required
             />
+            {comboForm.selectedDishes.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                Individual total: ₹{calculateTotalPrice().toFixed(2)}
+                {parseFloat(comboForm.price) < calculateTotalPrice() && (
+                  <span className="text-green-600 ml-2">
+                    (Save ₹{(calculateTotalPrice() - parseFloat(comboForm.price || 0)).toFixed(2)})
+                  </span>
+                )}
+              </p>
+            )}
           </div>
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Combo Image
             </label>
-            <div className="space-y-2">
-              {comboForm.image && (
-                <div className="relative w-full h-48 rounded-lg overflow-hidden border border-gray-300">
-                  <img
-                    src={comboForm.image}
-                    alt="Preview"
-                    className="w-full h-full object-cover"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setComboForm({ ...comboForm, image: '' })}
-                    className="absolute top-2 right-2 p-1 bg-red-600 text-white rounded-full hover:bg-red-700"
-                  >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </div>
-              )}
-              <div className="flex gap-2">
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="hidden"
-                  id="combo-image-upload"
-                  disabled={uploadingImage}
-                />
-                <label
-                  htmlFor="combo-image-upload"
-                  className={`flex-1 px-4 py-2 bg-blue-600 text-white text-center rounded-lg cursor-pointer hover:bg-blue-700 transition-colors ${
-                    uploadingImage ? 'opacity-50 cursor-not-allowed' : ''
-                  }`}
-                >
-                  {uploadingImage ? 'Uploading & Optimizing...' : comboForm.image ? 'Change Image' : 'Upload Image'}
-                </label>
-                {comboForm.image && (
-                  <button
-                    type="button"
-                    onClick={() => setComboForm({ ...comboForm, image: '' })}
-                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                  >
-                    Remove
-                  </button>
-                )}
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            {imagePreview && (
+              <div className="mt-2">
+                <img src={imagePreview} alt="Preview" className="h-32 w-32 object-cover rounded-lg" />
               </div>
-              <p className="text-xs text-gray-500">
-                Upload an image (Max 10MB). Images will be automatically optimized.
-              </p>
+            )}
+            {uploadProgress > 0 && uploadProgress < 100 && (
+              <div className="mt-2">
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-gray-600 mt-1">Uploading... {uploadProgress}%</p>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Dishes in Combo *
+              </label>
+              <button
+                type="button"
+                onClick={handleAddDish}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                + Add Dish
+              </button>
             </div>
+            
+            {comboForm.selectedDishes.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4 bg-gray-50 rounded">
+                No dishes added yet
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {comboForm.selectedDishes.map((item, index) => (
+                  <div key={index} className="flex gap-2">
+                    <select
+                      value={item.dishId}
+                      onChange={(e) => handleDishChange(index, 'dishId', e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      required
+                    >
+                      <option value="">Select Dish</option>
+                      {dishes.map((dish) => (
+                        <option key={dish.id} value={dish.id}>
+                          {dish.name} (₹{dish.price})
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min="1"
+                      value={item.quantity}
+                      onChange={(e) => handleDishChange(index, 'quantity', parseInt(e.target.value))}
+                      className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      placeholder="Qty"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveDish(index)}
+                      className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <div className="flex items-center">
             <input
               type="checkbox"
-              id="comboIsActive"
               checked={comboForm.isActive}
               onChange={(e) => setComboForm({ ...comboForm, isActive: e.target.checked })}
               className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
             />
-            <label htmlFor="comboIsActive" className="ml-2 text-sm text-gray-700">
-              Active
-            </label>
+            <span className="ml-2 text-sm text-gray-700">Active</span>
           </div>
 
           <div className="flex justify-end gap-2 pt-4">
             <button
               type="button"
-              onClick={() => {
-                setIsComboModal(false);
-                resetForm();
-              }}
+              onClick={() => setIsCreateModal(false)}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-              disabled={uploadingImage || selectedDishes.length === 0}
+              disabled={uploadProgress > 0 && uploadProgress < 100}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {editingCombo ? 'Update Combo' : 'Create Combo'}
+              Create Combo
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Edit Modal - Same structure as Create */}
+      <Modal
+        isOpen={isEditModal}
+        onClose={() => setIsEditModal(false)}
+        title="Edit Combo"
+      >
+        <form onSubmit={handleUpdateCombo} className="space-y-4">
+          {/* Same form fields as create modal */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Combo Name *
+            </label>
+            <input
+              type="text"
+              value={comboForm.name}
+              onChange={(e) => setComboForm({ ...comboForm, name: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Description
+            </label>
+            <textarea
+              value={comboForm.description}
+              onChange={(e) => setComboForm({ ...comboForm, description: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              rows="3"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Combo Price *
+            </label>
+            <input
+              type="number"
+              step="0.01"
+              value={comboForm.price}
+              onChange={(e) => setComboForm({ ...comboForm, price: e.target.value })}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              required
+            />
+            {comboForm.selectedDishes.length > 0 && (
+              <p className="text-xs text-gray-500 mt-1">
+                Individual total: ₹{calculateTotalPrice().toFixed(2)}
+                {parseFloat(comboForm.price) < calculateTotalPrice() && (
+                  <span className="text-green-600 ml-2">
+                    (Save ₹{(calculateTotalPrice() - parseFloat(comboForm.price || 0)).toFixed(2)})
+                  </span>
+                )}
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Combo Image
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleImageChange}
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            {imagePreview && (
+              <div className="mt-2">
+                <img src={imagePreview} alt="Preview" className="h-32 w-32 object-cover rounded-lg" />
+              </div>
+            )}
+            {uploadProgress > 0 && uploadProgress < 100 && (
+              <div className="mt-2">
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div
+                    className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  ></div>
+                </div>
+                <p className="text-xs text-gray-600 mt-1">Uploading... {uploadProgress}%</p>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="flex justify-between items-center mb-2">
+              <label className="block text-sm font-medium text-gray-700">
+                Dishes in Combo *
+              </label>
+              <button
+                type="button"
+                onClick={handleAddDish}
+                className="text-sm text-blue-600 hover:text-blue-700"
+              >
+                + Add Dish
+              </button>
+            </div>
+            
+            {comboForm.selectedDishes.length === 0 ? (
+              <p className="text-sm text-gray-500 text-center py-4 bg-gray-50 rounded">
+                No dishes added yet
+              </p>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {comboForm.selectedDishes.map((item, index) => (
+                  <div key={index} className="flex gap-2">
+                    <select
+                      value={item.dishId}
+                      onChange={(e) => handleDishChange(index, 'dishId', e.target.value)}
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      required
+                    >
+                      <option value="">Select Dish</option>
+                      {dishes.map((dish) => (
+                        <option key={dish.id} value={dish.id}>
+                          {dish.name} (₹{dish.price})
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      type="number"
+                      min="1"
+                      value={item.quantity}
+                      onChange={(e) => handleDishChange(index, 'quantity', parseInt(e.target.value))}
+                      className="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      placeholder="Qty"
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveDish(index)}
+                      className="px-3 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center">
+            <input
+              type="checkbox"
+              checked={comboForm.isActive}
+              onChange={(e) => setComboForm({ ...comboForm, isActive: e.target.checked })}
+              className="w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
+            />
+            <span className="ml-2 text-sm text-gray-700">Active</span>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-4">
+            <button
+              type="button"
+              onClick={() => setIsEditModal(false)}
+              className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={uploadProgress > 0 && uploadProgress < 100}
+              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Update Combo
             </button>
           </div>
         </form>
@@ -836,23 +888,17 @@ export default function CombosPage() {
       {/* Delete Confirmation Modal */}
       <Modal
         isOpen={isDeleteModal}
-        onClose={() => {
-          setIsDeleteModal(false);
-          setDeletingCombo(null);
-        }}
+        onClose={() => setIsDeleteModal(false)}
         title="Confirm Delete"
       >
         <div className="space-y-4">
           <p className="text-gray-700">
-            Are you sure you want to delete the combo "{deletingCombo?.name}"? This action cannot be undone.
+            Are you sure you want to delete "{selectedCombo?.name}"? This action cannot be undone.
           </p>
 
           <div className="flex justify-end gap-2 pt-4">
             <button
-              onClick={() => {
-                setIsDeleteModal(false);
-                setDeletingCombo(null);
-              }}
+              onClick={() => setIsDeleteModal(false)}
               className="px-4 py-2 text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200"
             >
               Cancel
