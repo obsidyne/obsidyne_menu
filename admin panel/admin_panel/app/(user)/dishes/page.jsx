@@ -495,7 +495,7 @@ const handleCreateDish = async (e) => {
               <div className="h-48 bg-gray-200 relative">
                 {dish.image ? (
                   <img
-                    src={dish.image}
+                    src={`${process.env.NEXT_PUBLIC_API_URL}/${dish.image}`}
                     alt={dish.name}
                     className="w-full h-full object-cover"
                   />
